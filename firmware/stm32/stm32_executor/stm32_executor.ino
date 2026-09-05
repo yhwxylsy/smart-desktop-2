@@ -5,7 +5,8 @@
 // 全局量由唯一归属模块以 extern 暴露。纯搬运阶段不改任何协议字符串、引脚号、波特率、
 // 时序常量与初始化/轮询顺序（详见 docs/REBUILD_GUARDRAILS.md）。
 //
-// 编译：arduino-cli compile -b STM32:stm32:Generic_F103C8Tx （FQBN 需在部署时探测确认）
+// 编译：arduino-cli compile -b STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8
+//       （配合 ARDUINO_DATA_DIR 指向实际数据目录；ESP32 侧见 edge/esp32s3/README.md）
 
 #include <Arduino.h>
 #include <Wire.h>

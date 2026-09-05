@@ -2,6 +2,41 @@
 
 `stm32_executor/stm32_executor.ino` is the current STM32-side protocol executor skeleton.
 
+## Modular structure (rebuild 2026-09)
+
+The executor was modularized: the sketch now holds only line buffers + `setup()`/`loop()`,
+while features live under `stm32_executor/src/` as `.h`/`.cpp` pairs (fonts moved to
+`src/ui/fonts/`). Dependency direction is strictly top-down; every shared global is owned
+by exactly one module and exposed via `extern` (config state is private behind the
+`configStore::` accessor on the ESP32 side; STM32 keeps plain externs).
+
+```text
+stm32_executor/
+├── config.h                     # 引脚/波特率/时序常量（逐字搬迁自原 sketch）
+├── stm32_executor.ino           # 仅 setup()/loop() 调度（94 行）
+└── src/
+    ├── core/        board, text_util
+    ├── protocol/    protocol(parse/ack), command_line(粘包/前缀/分类/预览), dispatcher(命令表)
+    ├── ui/          ui_state(状态机), oled(驱动), oled_screens(编排), rgb(物理灯), fonts/
+    ├── audio/       tts(SYN6288), buzzer(旋律)
+    ├── sensors/     aht20, ultrasonic, encoder, telemetry(遥测+RGB状态归类)
+    ├── actuators/   fan(DRV8833), servo
+    ├── input/       buttons(KEY1/KEY2)
+    └── system/      i2c_bus, ui_demo, user_context
+```
+
+Build (real toolchain, BluePill F103C8 board part):
+
+```text
+arduino-cli compile -b STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 firmware/stm32/stm32_executor
+```
+
+Behavior guards: protocol strings, pin numbers, baud rates, timing defaults and the
+setup/loop order are unchanged. Command knowledge (classify/preview/prefix-scan) is frozen
+by `firmware/stm32/protocol/command_knowledge_reference.py` + golden pytest corpus
+(`backend/tests/test_firmware_command_knowledge.py`); execution dispatch is table-driven in
+`dispatcher.cpp`. `executeNetCommand` 分支已并入 `NET_COMMANDS[]`，四源全合一留待硬件回归。
+
 ## Protocol acceptance
 
 It accepts both wrapped production commands and direct debug commands:
