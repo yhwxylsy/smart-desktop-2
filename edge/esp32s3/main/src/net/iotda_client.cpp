@@ -1,10 +1,13 @@
 // 华为云 IoTDA MQTT（原 main.ino L69-76、L253-482 整块搬运）。
 // 仅当 SMARTDESK_IOTDA_ENABLED=1 时参与编译；关闭时本文件内容被整体剔除。
+// 注意：#if 宏判断前必须已包含 config.h（独立 TU 中未定义宏按 0 处理，
+// 否则整个文件会被误判为空翻译单元导致链接期 undefined reference）。
+#include "iotda_client.h"
+#include "../../config.h"
+
 #if SMARTDESK_IOTDA_ENABLED
 
-#include "iotda_client.h"
 #include <mbedtls/md.h>
-#include "../../config.h"
 #include "../core/hex_util.h"
 #include "../bridge/stm32_link.h"
 #include "../config/config_store.h"

@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 
 #if SMARTDESK_IOTDA_PORT == 1883
 extern WiFiClient iotdaClient;
