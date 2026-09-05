@@ -46,11 +46,12 @@ void setup() {
   Serial.println(rfidVersion, HEX);
   initMicrophone();
 
-  loadConfig();
-  if (strlen(SMARTDESK_BOOTSTRAP_SERVER_URL) > 0 && parseServerUrl(SMARTDESK_BOOTSTRAP_SERVER_URL)) {
-    saveConfig();
+  configStore::load();
+  if (strlen(SMARTDESK_BOOTSTRAP_SERVER_URL) > 0 &&
+      configStore::parseServerUrl(SMARTDESK_BOOTSTRAP_SERVER_URL)) {
+    configStore::save();
     Serial.print("[CFG] bootstrap server=");
-    Serial.println(httpBase());
+    Serial.println(configStore::httpBase());
   }
   connectWifi();
   startWebSocket();

@@ -216,7 +216,7 @@ ChunkUploadResponse postMicWavChunk(
 
   WiFiClient client;
   client.setTimeout(120000);
-  if (!client.connect(serverHost.c_str(), serverPort)) {
+  if (!client.connect(configStore::host().c_str(), configStore::port())) {
     result.error = "chunk connect failed rssi=" + String(WiFi.RSSI()) + " status=" + String((int)WiFi.status());
     return result;
   }
@@ -229,7 +229,7 @@ ChunkUploadResponse postMicWavChunk(
       WiFi.RSSI(),
       (int)WiFi.status());
   client.printf("POST /api/asr/transcribe/chunk HTTP/1.1\r\n");
-  client.printf("Host: %s:%u\r\n", serverHost.c_str(), serverPort);
+  client.printf("Host: %s:%u\r\n", configStore::host().c_str(), configStore::port());
   client.printf("Connection: close\r\n");
   client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary.c_str());
   client.printf("Content-Length: %u\r\n\r\n", (unsigned int)requestSize);
@@ -260,7 +260,7 @@ ChunkUploadResponse postMicWavChunk(
 
 AsrUploadResult uploadMicWavChunked(const uint8_t *wavBuffer, size_t wavSize, const String &source, bool inject) {
   AsrUploadResult result;
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty()) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty()) {
     result.error = "WiFi/server not ready";
     return result;
   }
@@ -321,7 +321,7 @@ AsrUploadResult uploadMicWavChunked(const uint8_t *wavBuffer, size_t wavSize, co
 
 AsrUploadResult uploadMicWav(const uint8_t *wavBuffer, size_t wavSize, const String &source, bool inject) {
   AsrUploadResult result;
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty()) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty()) {
     result.error = "WiFi/server not ready";
     return result;
   }
@@ -357,7 +357,7 @@ AsrUploadResult uploadMicWav(const uint8_t *wavBuffer, size_t wavSize, const Str
     result = AsrUploadResult();
     WiFiClient client;
     client.setTimeout(120000);
-    if (!client.connect(serverHost.c_str(), serverPort)) {
+    if (!client.connect(configStore::host().c_str(), configStore::port())) {
       result.error = "connect failed rssi=" + String(WiFi.RSSI()) + " status=" + String((int)WiFi.status());
       Serial.printf("[MIC] upload attempt %u failed: %s\n", attempt, result.error.c_str());
       delay(800);
@@ -369,10 +369,10 @@ AsrUploadResult uploadMicWav(const uint8_t *wavBuffer, size_t wavSize, const Str
         attempt,
         WiFi.RSSI(),
         (int)WiFi.status(),
-        serverHost.c_str(),
-        serverPort);
+        configStore::host().c_str(),
+        configStore::port());
     client.printf("POST /api/asr/transcribe HTTP/1.1\r\n");
-    client.printf("Host: %s:%u\r\n", serverHost.c_str(), serverPort);
+    client.printf("Host: %s:%u\r\n", configStore::host().c_str(), configStore::port());
     client.printf("Connection: close\r\n");
     client.printf("Content-Type: multipart/form-data; boundary=%s\r\n", boundary.c_str());
     client.printf("Content-Length: %u\r\n\r\n", (unsigned int)totalSize);

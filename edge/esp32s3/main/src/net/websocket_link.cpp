@@ -69,20 +69,20 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
 }
 
 void startWebSocket() {
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty() || wsStarted) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty() || wsStarted) {
     return;
   }
-  if (serverSecure) {
-    webSocket.beginSSL(serverHost.c_str(), serverPort, wsPath().c_str());
+  if (configStore::secure()) {
+    webSocket.beginSSL(configStore::host().c_str(), configStore::port(), configStore::wsPath().c_str());
   } else {
-    webSocket.begin(serverHost.c_str(), serverPort, wsPath().c_str());
+    webSocket.begin(configStore::host().c_str(), configStore::port(), configStore::wsPath().c_str());
   }
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
   webSocket.enableHeartbeat(15000, 3000, 2);
   wsStarted = true;
   Serial.print("[WS] connecting to ");
-  Serial.println(wsBase() + wsPath());
+  Serial.println(configStore::wsBase() + configStore::wsPath());
 }
 
 bool pauseWebSocketForMicUpload() {

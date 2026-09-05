@@ -12,7 +12,7 @@ bool scanTargetWifi(int32_t *channelOut, uint8_t bssidOut[6], int32_t *rssiOut, 
   int32_t bestChannel = 0;
   bool found = false;
   for (int i = 0; i < count; i++) {
-    if (WiFi.SSID(i) == wifiSsid) {
+    if (WiFi.SSID(i) == configStore::wifiSsid()) {
       found = true;
       if (WiFi.RSSI(i) > bestRssi) {
         bestIndex = i;
@@ -49,7 +49,7 @@ bool scanTargetWifi(int32_t *channelOut, uint8_t bssidOut[6], int32_t *rssiOut, 
 }
 
 void connectWifi() {
-  if (wifiSsid.isEmpty()) {
+  if (configStore::wifiSsid().isEmpty()) {
     if (millis() - lastWifiMissingLogMs > 5000) {
       lastWifiMissingLogMs = millis();
       Serial.println("[WIFI] not configured; use CFG:WIFI:<ssid>,<password>");
@@ -72,9 +72,9 @@ void connectWifi() {
   int32_t targetRssi = 0;
   bool hasTarget = scanTargetWifi(&targetChannel, targetBssid, &targetRssi);
   if (hasTarget && targetChannel > 0) {
-    WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str(), targetChannel, targetBssid);
+    WiFi.begin(configStore::wifiSsid().c_str(), configStore::wifiPassword().c_str(), targetChannel, targetBssid);
   } else {
-    WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
+    WiFi.begin(configStore::wifiSsid().c_str(), configStore::wifiPassword().c_str());
   }
   Serial.print("[WIFI] connecting");
   unsigned long deadline = millis() + WIFI_CONNECT_TIMEOUT_MS;

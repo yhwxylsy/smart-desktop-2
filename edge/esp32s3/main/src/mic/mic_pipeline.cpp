@@ -70,7 +70,7 @@ bool captureAndUploadMic(bool inject, const String &source) {
     sendToStm32("NET:UI:ERROR", 0);
     return false;
   }
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty()) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty()) {
     Serial.println("[MIC] WiFi/server not ready");
     sendToStm32("NET:UI:ERROR", 0);
     return false;
@@ -142,7 +142,7 @@ bool captureAndUploadMicAfterCue(String cueText, bool inject, const String &sour
     Serial.println("[MIC] not ready");
     return false;
   }
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty()) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty()) {
     Serial.println("[MIC] WiFi/server not ready");
     return false;
   }
@@ -170,7 +170,7 @@ bool runMicSelfTest(String phrase) {
     Serial.println("[MIC] not ready");
     return false;
   }
-  if (WiFi.status() != WL_CONNECTED || serverHost.isEmpty()) {
+  if (WiFi.status() != WL_CONNECTED || configStore::host().isEmpty()) {
     Serial.println("[MIC] WiFi/server not ready");
     return false;
   }

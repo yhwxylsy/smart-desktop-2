@@ -2,47 +2,47 @@
 #include "../../config.h"
 #include <Preferences.h>
 
-Preferences prefs;
+namespace configStore {
 
-String wifiSsid;
-String wifiPassword;
-String serverHost;
-String deviceToken = String(SMARTDESK_DEVICE_TOKEN);
-uint16_t serverPort = 8082;
-bool serverSecure = false;
+static Preferences prefs;
+static String gWifiSsid;
+static String gWifiPassword;
+static String gServerHost;
+static String gDeviceToken = String(SMARTDESK_DEVICE_TOKEN);
+static uint16_t gServerPort = 8082;
+static bool gServerSecure = false;
 
-String httpBase() {
-  return String(serverSecure ? "https://" : "http://") + serverHost + ":" + String(serverPort);
-}
-
-String wsBase() {
-  return String(serverSecure ? "wss://" : "ws://") + serverHost + ":" + String(serverPort);
-}
-
-String wsPath() {
-  return "/api/realtime/ws?device_id=" + String(DEVICE_ID) + "&edge_id=" + String(EDGE_ID);
-}
-
-void saveConfig() {
-  prefs.begin("smartdesk", false);
-  prefs.putString("wifi_ssid", wifiSsid);
-  prefs.putString("wifi_pass", wifiPassword);
-  prefs.putString("server_host", serverHost);
-  prefs.putUShort("server_port", serverPort);
-  prefs.putBool("server_secure", serverSecure);
-  prefs.putString("device_token", deviceToken);
-  prefs.end();
-}
-
-void loadConfig() {
+void load() {
   prefs.begin("smartdesk", true);
-  wifiSsid = prefs.getString("wifi_ssid", "");
-  wifiPassword = prefs.getString("wifi_pass", "");
-  serverHost = prefs.getString("server_host", "");
-  serverPort = prefs.getUShort("server_port", 8082);
-  serverSecure = prefs.getBool("server_secure", false);
-  deviceToken = prefs.getString("device_token", SMARTDESK_DEVICE_TOKEN);
+  gWifiSsid = prefs.getString("wifi_ssid", "");
+  gWifiPassword = prefs.getString("wifi_pass", "");
+  gServerHost = prefs.getString("server_host", "");
+  gServerPort = prefs.getUShort("server_port", 8082);
+  gServerSecure = prefs.getBool("server_secure", false);
+  gDeviceToken = prefs.getString("device_token", SMARTDESK_DEVICE_TOKEN);
   prefs.end();
+}
+
+void save() {
+  prefs.begin("smartdesk", false);
+  prefs.putString("wifi_ssid", gWifiSsid);
+  prefs.putString("wifi_pass", gWifiPassword);
+  prefs.putString("server_host", gServerHost);
+  prefs.putUShort("server_port", gServerPort);
+  prefs.putBool("server_secure", gServerSecure);
+  prefs.putString("device_token", gDeviceToken);
+  prefs.end();
+}
+
+void reset() {
+  prefs.begin("smartdesk", false);
+  prefs.clear();
+  prefs.end();
+  gWifiSsid = "";
+  gWifiPassword = "";
+  gServerHost = "";
+  gDeviceToken = String(SMARTDESK_DEVICE_TOKEN);
+  gServerSecure = false;
 }
 
 bool parseServerUrl(String value) {
@@ -65,13 +65,60 @@ bool parseServerUrl(String value) {
   }
   int colon = value.lastIndexOf(':');
   if (colon >= 0) {
-    serverHost = value.substring(0, colon);
-    serverPort = (uint16_t)value.substring(colon + 1).toInt();
+    gServerHost = value.substring(0, colon);
+    gServerPort = (uint16_t)value.substring(colon + 1).toInt();
   } else {
-    serverHost = value;
-    serverPort = secure ? 443 : 8082;
+    gServerHost = value;
+    gServerPort = secure ? 443 : 8082;
   }
-  serverHost.trim();
-  serverSecure = secure;
-  return serverHost.length() > 0 && serverPort > 0;
+  gServerHost.trim();
+  gServerSecure = secure;
+  return gServerHost.length() > 0 && gServerPort > 0;
 }
+
+const String &host() {
+  return gServerHost;
+}
+
+uint16_t port() {
+  return gServerPort;
+}
+
+bool secure() {
+  return gServerSecure;
+}
+
+const String &deviceToken() {
+  return gDeviceToken;
+}
+
+const String &wifiSsid() {
+  return gWifiSsid;
+}
+
+const String &wifiPassword() {
+  return gWifiPassword;
+}
+
+String httpBase() {
+  return String(gServerSecure ? "https://" : "http://") + gServerHost + ":" + String(gServerPort);
+}
+
+String wsBase() {
+  return String(gServerSecure ? "wss://" : "ws://") + gServerHost + ":" + String(gServerPort);
+}
+
+String wsPath() {
+  return "/api/realtime/ws?device_id=" + String(DEVICE_ID) + "&edge_id=" + String(EDGE_ID);
+}
+
+void setWifi(const String &ssid, const String &password) {
+  gWifiSsid = ssid;
+  gWifiPassword = password;
+}
+
+void setToken(const String &token) {
+  gDeviceToken = token;
+}
+
+}  // namespace configStore

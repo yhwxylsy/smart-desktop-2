@@ -1,5 +1,6 @@
 #include "serial_cli.h"
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include "../../config.h"
 #include "../config/config_store.h"
 #include "../core/hex_util.h"
@@ -11,154 +12,168 @@
 
 static String usbLine;
 
+// ---- 命令处理器（每个函数逐字保留原 if 分支体，仅改造成独立函数）----
+
+static void handleCfgWifi(const String &line) {
+  String value = line.substring(strlen("CFG:WIFI:"));
+  if (value == "SHOW") {
+    Serial.print("[CFG] ssid=");
+    Serial.print(configStore::wifiSsid());
+    Serial.print(" server=");
+    Serial.print(configStore::secure() ? "https://" : "http://");
+    Serial.print(configStore::host());
+    Serial.print(":");
+    Serial.println(configStore::port());
+  } else if (value == "SCAN") {
+    scanWifi();
+  } else {
+    int comma = value.indexOf(',');
+    if (comma < 0) {
+      Serial.println("[CFG] use CFG:WIFI:<ssid>,<password>");
+    } else {
+      configStore::setWifi(value.substring(0, comma), value.substring(comma + 1));
+      configStore::save();
+      Serial.println("[CFG] wifi saved");
+      WiFi.disconnect(true);
+      delay(200);
+      connectWifi();
+      startWebSocket();
+    }
+  }
+}
+
+static void handleCfgNetTcp(const String &line) {
+  probeTcp(line.substring(strlen("CFG:NET:TCP:")));
+}
+
+static void handleCfgServer(const String &line) {
+  if (configStore::parseServerUrl(line.substring(strlen("CFG:SERVER:")))) {
+    configStore::save();
+    wsStarted = false;
+    webSocket.disconnect();
+    Serial.println("[CFG] server saved");
+    startWebSocket();
+  } else {
+    Serial.println("[CFG] invalid server");
+  }
+}
+
+static void handleCfgToken(const String &line) {
+  String token = line.substring(strlen("CFG:TOKEN:"));
+  token.trim();
+  configStore::setToken(token);
+  configStore::save();
+  Serial.println(configStore::deviceToken().length() > 0 ? "[CFG] device token saved" : "[CFG] device token cleared");
+}
+
+static void handleCfgReset(const String &line) {
+  configStore::reset();
+  Serial.println("[CFG] cleared");
+}
+
+static void handleCfgUartPing(const String &line) {
+  sendToStm32("NET:UART?");
+}
+
+static void handleCfgRfidStatus(const String &line) {
+  printRfidStatus(true);
+}
+
+static void handleCfgRfidReset(const String &line) {
+  byte version = initializeRfidReader();
+  Serial.printf("[RFID] reinitialized version=0x%02X\n", version);
+  printRfidStatus(true);
+}
+
+static void handleMicRecCue(const String &line) {
+  captureAndUploadMicAfterCue("");
+}
+
+static void handleMicRecCueAsrOnly(const String &line) {
+  captureAndUploadMicAfterCue("", false, "esp32_mic_asr_test");
+}
+
+static void handleMicRecCueArg(const String &line) {
+  captureAndUploadMicAfterCue(line.substring(strlen("CFG:MIC:REC:CUE:")));
+}
+
+static void handleMicRecAsrOnly(const String &line) {
+  captureAndUploadMic(false, "esp32_mic_asr_test");
+}
+
+static void handleMicRec(const String &line) {
+  captureAndUploadMic();
+}
+
+static void handleMicSelfTest(const String &line) {
+  String phrase = "";
+  if (line.startsWith("CFG:MIC:SELFTEST:")) {
+    phrase = line.substring(strlen("CFG:MIC:SELFTEST:"));
+  }
+  runMicSelfTest(phrase);
+}
+
+static void handleCfgTts(const String &line) {
+  sendToStm32("NET:TTSHEX:" + utf8Hex(line.substring(strlen("CFG:TTS:"))));
+}
+
+static void handleCfgOled(const String &line) {
+  sendToStm32("NET:OLED:" + line.substring(strlen("CFG:OLED:")));
+}
+
+static void handleChat(const String &line) {
+  JsonDocument doc;
+  doc["type"] = "text";
+  doc["text"] = line.substring(strlen("CHAT:"));
+  String body;
+  serializeJson(doc, body);
+  if (wsConnected) {
+    webSocket.sendTXT(body);
+  } else {
+    Serial.println("[CHAT] websocket not connected");
+  }
+}
+
+// ---- 表驱动分发（顺序 = 原 if 链顺序；exact=false 表示前缀匹配）----
+
+struct CliEntry {
+  const char *prefix;
+  bool exact;
+  void (*run)(const String &line);
+};
+
+static const CliEntry CLI_COMMANDS[] = {
+    {"CFG:WIFI:", false, handleCfgWifi},
+    {"CFG:NET:TCP:", false, handleCfgNetTcp},
+    {"CFG:SERVER:", false, handleCfgServer},
+    {"CFG:TOKEN:", false, handleCfgToken},
+    {"CFG:RESET", true, handleCfgReset},
+    {"CFG:UART:PING", true, handleCfgUartPing},
+    {"CFG:RFID:STATUS", true, handleCfgRfidStatus},
+    {"CFG:RFID:RESET", true, handleCfgRfidReset},
+    {"CFG:MIC:REC:CUE", true, handleMicRecCue},
+    {"CFG:MIC:REC:CUE:ASRONLY", true, handleMicRecCueAsrOnly},
+    {"CFG:MIC:REC:CUE:", false, handleMicRecCueArg},
+    {"CFG:MIC:REC:ASRONLY", true, handleMicRecAsrOnly},
+    {"CFG:MIC:REC", true, handleMicRec},
+    {"CFG:MIC:SELFTEST", false, handleMicSelfTest},
+    {"CFG:TTS:", false, handleCfgTts},
+    {"CFG:OLED:", false, handleCfgOled},
+    {"CHAT:", false, handleChat},
+};
+
 void handleSerialCommand(String line) {
   line.trim();
   if (line.isEmpty()) {
     return;
   }
 
-  if (line.startsWith("CFG:WIFI:")) {
-    String value = line.substring(strlen("CFG:WIFI:"));
-    if (value == "SHOW") {
-      Serial.print("[CFG] ssid=");
-      Serial.print(wifiSsid);
-      Serial.print(" server=");
-      Serial.print(serverSecure ? "https://" : "http://");
-      Serial.print(serverHost);
-      Serial.print(":");
-      Serial.println(serverPort);
-    } else if (value == "SCAN") {
-      scanWifi();
-    } else {
-      int comma = value.indexOf(',');
-      if (comma < 0) {
-        Serial.println("[CFG] use CFG:WIFI:<ssid>,<password>");
-      } else {
-        wifiSsid = value.substring(0, comma);
-        wifiPassword = value.substring(comma + 1);
-        saveConfig();
-        Serial.println("[CFG] wifi saved");
-        WiFi.disconnect(true);
-        delay(200);
-        connectWifi();
-        startWebSocket();
-      }
+  for (const CliEntry &entry : CLI_COMMANDS) {
+    bool matched = entry.exact ? (line == entry.prefix) : line.startsWith(entry.prefix);
+    if (matched) {
+      entry.run(line);
+      return;
     }
-    return;
-  }
-
-  if (line.startsWith("CFG:NET:TCP:")) {
-    probeTcp(line.substring(strlen("CFG:NET:TCP:")));
-    return;
-  }
-
-  if (line.startsWith("CFG:SERVER:")) {
-    if (parseServerUrl(line.substring(strlen("CFG:SERVER:")))) {
-      saveConfig();
-      wsStarted = false;
-      webSocket.disconnect();
-      Serial.println("[CFG] server saved");
-      startWebSocket();
-    } else {
-      Serial.println("[CFG] invalid server");
-    }
-    return;
-  }
-
-  if (line.startsWith("CFG:TOKEN:")) {
-    deviceToken = line.substring(strlen("CFG:TOKEN:"));
-    deviceToken.trim();
-    saveConfig();
-    Serial.println(deviceToken.length() > 0 ? "[CFG] device token saved" : "[CFG] device token cleared");
-    return;
-  }
-
-  if (line == "CFG:RESET") {
-    prefs.begin("smartdesk", false);
-    prefs.clear();
-    prefs.end();
-    wifiSsid = "";
-    wifiPassword = "";
-    serverHost = "";
-    deviceToken = String(SMARTDESK_DEVICE_TOKEN);
-    serverSecure = false;
-    Serial.println("[CFG] cleared");
-    return;
-  }
-
-  if (line == "CFG:UART:PING") {
-    sendToStm32("NET:UART?");
-    return;
-  }
-
-  if (line == "CFG:RFID:STATUS") {
-    printRfidStatus(true);
-    return;
-  }
-
-  if (line == "CFG:RFID:RESET") {
-    byte version = initializeRfidReader();
-    Serial.printf("[RFID] reinitialized version=0x%02X\n", version);
-    printRfidStatus(true);
-    return;
-  }
-
-  if (line == "CFG:MIC:REC:CUE") {
-    captureAndUploadMicAfterCue("");
-    return;
-  }
-
-  if (line == "CFG:MIC:REC:CUE:ASRONLY") {
-    captureAndUploadMicAfterCue("", false, "esp32_mic_asr_test");
-    return;
-  }
-
-  if (line.startsWith("CFG:MIC:REC:CUE:")) {
-    captureAndUploadMicAfterCue(line.substring(strlen("CFG:MIC:REC:CUE:")));
-    return;
-  }
-
-  if (line == "CFG:MIC:REC:ASRONLY") {
-    captureAndUploadMic(false, "esp32_mic_asr_test");
-    return;
-  }
-
-  if (line == "CFG:MIC:REC") {
-    captureAndUploadMic();
-    return;
-  }
-
-  if (line.startsWith("CFG:MIC:SELFTEST")) {
-    String phrase = "";
-    if (line.startsWith("CFG:MIC:SELFTEST:")) {
-      phrase = line.substring(strlen("CFG:MIC:SELFTEST:"));
-    }
-    runMicSelfTest(phrase);
-    return;
-  }
-
-  if (line.startsWith("CFG:TTS:")) {
-    sendToStm32("NET:TTSHEX:" + utf8Hex(line.substring(strlen("CFG:TTS:"))));
-    return;
-  }
-
-  if (line.startsWith("CFG:OLED:")) {
-    sendToStm32("NET:OLED:" + line.substring(strlen("CFG:OLED:")));
-    return;
-  }
-
-  if (line.startsWith("CHAT:")) {
-    JsonDocument doc;
-    doc["type"] = "text";
-    doc["text"] = line.substring(strlen("CHAT:"));
-    String body;
-    serializeJson(doc, body);
-    if (wsConnected) {
-      webSocket.sendTXT(body);
-    } else {
-      Serial.println("[CHAT] websocket not connected");
-    }
-    return;
   }
 
   Serial.println("[CFG] unknown command");
