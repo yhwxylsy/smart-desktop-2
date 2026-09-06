@@ -13,7 +13,7 @@ by exactly one module and exposed via `extern` (config state is private behind t
 ```text
 stm32_executor/
 ├── config.h                     # 引脚/波特率/时序常量（逐字搬迁自原 sketch）
-├── stm32_executor.ino           # 仅 setup()/loop() 调度（94 行）
+├── stm32_executor.ino           # 仅 setup()/loop() 调度（108 行）
 └── src/
     ├── core/        board, text_util
     ├── protocol/    protocol(parse/ack), command_line(粘包/前缀/分类/预览), dispatcher(命令表)
@@ -22,7 +22,7 @@ stm32_executor/
     ├── sensors/     aht20, ultrasonic, encoder, telemetry(遥测+RGB状态归类)
     ├── actuators/   fan(DRV8833), servo
     ├── input/       buttons(KEY1/KEY2)
-    └── system/      i2c_bus, ui_demo, user_context
+    └── system/      i2c_bus, ui_demo, user_context, watchdog(独立看门狗)
 ```
 
 Build (real toolchain, BluePill F103C8 board part):
@@ -32,7 +32,10 @@ arduino-cli compile -b STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8 firmw
 ```
 
 Behavior guards: protocol strings, pin numbers, baud rates, timing defaults and the
-setup/loop order are unchanged. Command knowledge (classify/preview/prefix-scan) is frozen
+setup/loop order are unchanged. **One documented exception (2026-09-06):** the USART3
+full-duplex rewire changed which pin drives SYN6288 (`PB10` -> `PB3`) and raised the
+STM32<->ESP32S3 baud rate from 9600 to 115200 on both ends. Protocol strings themselves
+(`NET:*` / `BT:*`) and all timing defaults remain untouched. See `docs/HARDWARE_WIRING.md`. Command knowledge (classify/preview/prefix-scan) is frozen
 by `firmware/stm32/protocol/command_knowledge_reference.py` + golden pytest corpus
 (`backend/tests/test_firmware_command_knowledge.py`); execution dispatch is table-driven in
 `dispatcher.cpp`. `executeNetCommand` 分支已并入 `NET_COMMANDS[]`，四源全合一留待硬件回归。
@@ -159,11 +162,40 @@ Sensor-derived `rgb_status`, `rgb_reason`, and `rgb_mode` fields remain in telem
 
 Those sensor fields no longer commandeer the physical RGB indicator. The physical lamp consistently reports the human interaction state, while sensor detail stays on the OLED, Web, mini program, and diagnostic telemetry.
 
+## Independent watchdog (IWDG)
+
+`src/system/watchdog.*` wraps the STM32 independent watchdog. It runs off the LSI low-speed
+clock, so it still fires if the main clock or firmware flow is broken.
+
+- `setupWatchdog()` is called at the **end** of `setup()`, after every peripheral is initialised,
+  so a slow boot cannot trigger a spurious reset.
+- `feedWatchdog()` is called at the end of every `loop()`.
+- Timeout is `WATCHDOG_TIMEOUT_MS` (5000 ms) in `config.h`. It must be larger than the worst-case
+  single `loop()` pass (telemetry + OLED flush + one SYN6288 frame) but smaller than the stall
+  you are willing to tolerate.
+- On boot the USB console prints the arming line, and prints a warning if the **previous** reset
+  was caused by the watchdog — that is the fastest way to tell a real watchdog reset from a
+  power cycle in the field:
+
+```text
+[WDT] previous reset came from the watchdog (loop() stalled)
+[WDT] armed timeout_ms=5000
+```
+
+IWDG cannot be stopped once started. To disable it completely, compile with
+`-DWATCHDOG_ENABLED_BY_DEFAULT=0`; the firmware then prints
+`[WDT] disabled (WATCHDOG_ENABLED_BY_DEFAULT=0)` and never arms it.
+
 ## Notes before flashing
 
 - This sketch targets STM32duino-style Arduino builds. If the final Keil project is used instead, port the parser and command switch directly.
 - Fan control now uses the DRV8833 port from the Botelvdong kit. On the current fan wiring, `PA1/TIM2_CH2` is the PWM drive input and `PA0/TIM2_CH1` is held LOW so the fan spins the useful direction. `NET:FAN:ON:<1-3>` maps to about 85%, 92%, and 100% PWM duty; `NET:FAN:OFF` and `NET:MOTOR:OFF` pull both DRV8833 inputs LOW. `PB5` remains the native relay output pin, but it is not the fan output in this build.
-- SYN6288 is reached through `Serial3` TX/PB10. `NET:TTS:` and `NET:TTSHEX:` are both converted into a SYN6288 synthesis frame (`0xFD + len + 0x01 + type + payload + xor`) instead of sending raw text bytes.
+- SYN6288 is reached through the `PB3` software serial TX (`syn6288Serial`), not through `Serial3`/`PB10`. `NET:TTS:` and `NET:TTSHEX:` are both converted into a SYN6288 synthesis frame (`0xFD + len + 0x01 + type + payload + xor`) instead of sending raw text bytes.
+- Since 2026-09-06 the STM32 <-> ESP32S3 link uses USART3 full duplex: `PB11` receives `NET:*`, `PB10` sends `BT:*`, both at `115200 8N1` (ESP32S3 side uses `D5/GPIO6` and `D7/GPIO44`). `PB10` used to drive SYN6288; the two lines were swapped so the 600B telemetry uplink runs on hardware UART instead of a bit-banged software serial that stalled `loop()` for ~630 ms every 4 s. See `docs/HARDWARE_WIRING.md`.
+- At 115200 the 600B telemetry frame takes about 52 ms on the wire, so `writeBack()` no longer
+  stalls `loop()` the way the old 9600 software-serial uplink did (about 630 ms). If you still
+  want the write to be fully non-blocking, compile with `-DSERIAL_TX_BUFFER_SIZE=1024`; note that
+  this core version has no `HardwareSerial::setTxBufferSize()`.
 - SYN6288 speech volume defaults to 60%. `NET:VOLUME:<0-16|UP|DOWN>` remains protocol-compatible, while the device maps it to a user-facing 0%-100% range. Each rotary-encoder detent and each `UP`/`DOWN` command changes volume by 10%, clamps at 0%/100% without wrapping, and OLED volume readouts use percentages only. Volume changes are shown on OLED only; the device no longer speaks the current volume unless the AI is explicitly asked.
 - The current implementation decodes UTF-8 and sends SYN6288 in Unicode mode (`type=0x03`), which avoids keeping a GBK lookup table on STM32 while still handling Chinese short sentences.
 - The UART parser now counts empty ESP-side line delimiters on USB logs. If the "first line swallowed" issue still appears on hardware, those counters help distinguish "sender prefixed an empty CR/LF" from "STM32 lost actual payload bytes".

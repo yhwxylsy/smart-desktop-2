@@ -7,7 +7,9 @@
   C. dispatcher.cpp NET_COMMANDS[] ↔ command_knowledge_reference（无孤立命令、
      无孤儿扫描前缀；NET:CMD: 为已知例外——该前缀只在 parse 层消费）
   D. ui_state.cpp eventLabel switch 返回序 ↔ command_knowledge_reference.EVENT_LABELS
-E(parse_line/ack_for 等价) 由 backend/tests/test_firmware_protocol.py 承担，不在本脚本重复。
+  E. 串口接线改造（2026-09-06）后的交叉一致性：两端波特率必须相等、
+     docs/HARDWARE_WIRING.md 必须已同步新映射、旧串口标识符必须彻底消失
+F(parse_line/ack_for 等价) 由 backend/tests/test_firmware_protocol.py 承担，不在本脚本重复。
 
 用法：python tools/verify_firmware_consistency.py
 退出码：0=全部 PASS；1=存在 FAIL。
@@ -74,8 +76,10 @@ def check_a_stm32_pins(reference_cfg: str) -> None:
     # config.h 中 `static const ... NAME = VALUE;`
     macros = _pick_macros(reference_cfg)
     expected = {
-        "ESP_IN_BAUD": "9600",
-        "ESP_ACK_BAUD": "9600",
+        # 2026-09-06：USART3 全双工对 ESP32S3（两端硬件 UART），SYN6288 改走 PB3 软件串口。
+        "ESP_UART_BAUD": "115200",
+        "SYN6288_BAUD": "9600",
+        "WATCHDOG_TIMEOUT_MS": "5000",
         "PIN_BUZZER": "PB9",
         "PIN_DRV8833_IN1": "PA0",
         "PIN_DRV8833_IN2": "PA1",
@@ -98,10 +102,10 @@ def check_a_stm32_pins(reference_cfg: str) -> None:
         got = macros.get(name, "").strip()
         _record(f"A.stm32 {name}", got == want, f"want {want}, got '{got}'")
 
-    # 串口对象：espAckSerial(PB4,PB3)；espCommandSerial(PB11,PB10)；usbConsole(PA3,PA2)
+    # 串口对象：syn6288Serial(PB4,PB3)；espCommandSerial(PB11,PB10)；usbConsole(PA3,PA2)
     board_src = _read(STM32_BOARD)
     serial_checks = [
-        ("SoftwareSerial espAckSerial(PB4, PB3)", r"espAckSerial\(PB4,\s*PB3\)"),
+        ("SoftwareSerial syn6288Serial(PB4, PB3)", r"syn6288Serial\(PB4,\s*PB3\)"),
         ("HardwareSerial espCommandSerial(PB11, PB10)", r"espCommandSerial\(PB11,\s*PB10\)"),
         ("HardwareSerial usbConsole(PA3, PA2)", r"usbConsole\(PA3,\s*PA2\)"),
     ]
@@ -112,6 +116,7 @@ def check_a_stm32_pins(reference_cfg: str) -> None:
 def check_b_esp32_pins(esp32_cfg: str) -> None:
     macros = dict(re.findall(r"static\s+const\s+int\s+(\w+)\s*=\s*(\d+);", esp32_cfg))
     expected = {
+        "STM32_UART_BAUD": "115200",  # must match STM32 ESP_UART_BAUD (checked in E)
         "STM32_TX_PIN": "6",      # XIAO D5
         "STM32_RX_PIN": "44",     # XIAO D7
         "RFID_RST_PIN": "3",      # D2
@@ -168,12 +173,78 @@ def check_d_event_labels(ui_state_src: str, ref) -> None:
             f"got {labels}")
 
 
+# 历史归档文档：记录的是当时的实测状态，只追加"后续已变更"附注，不改原文，
+# 因此不参与"旧标识符必须消失"的扫描，避免把历史记录误判为不一致。
+HISTORICAL_DOCS = {
+    "PROJECT_PROGRESS_FULL_2026-06-24.md",
+    "docs/TEST_REPORT_FIRMWARE_2026-09-05.md",
+    "docs/REMAINING_SENSOR_CONNECTION_HANDOFF_2026-06-13.md",
+}
+
+# 2026-09-06 串口改造后必须彻底消失的旧标识符。
+STALE_TOKENS = ("espAckSerial", "ESP_IN_BAUD", "ESP_ACK_BAUD")
+
+SCAN_SUFFIXES = (".md", ".py", ".ino", ".h", ".cpp", ".cmd", ".ps1")
+SKIP_DIRS = {".git", "node_modules", "__pycache__", ".codebuddy", "data"}
+
+
+# 脚本本体定义了这些标识符，必然自匹配，扫描时排除自身。
+SELF_REL = Path(__file__).relative_to(ROOT).as_posix()
+
+
+def _iter_scan_files():
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or path.suffix not in SCAN_SUFFIXES:
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == SELF_REL:
+            continue
+        if any(part in SKIP_DIRS for part in rel.split("/")[:-1]):
+            continue
+        if rel in HISTORICAL_DOCS:
+            continue
+        yield rel, path
+
+
+def check_e_serial_rewire(stm32_cfg: str, esp32_cfg: str) -> None:
+    # E1: 两端波特率必须一致（一端改一端忘改是最容易发生的漂移）
+    stm32_baud = _pick_macros(stm32_cfg).get("ESP_UART_BAUD", "").strip()
+    esp32_baud = _pick_macros(esp32_cfg).get("STM32_UART_BAUD", "").strip()
+    _record("E.baud cross-match", bool(stm32_baud) and stm32_baud == esp32_baud,
+            f"STM32 ESP_UART_BAUD={stm32_baud!r} vs ESP32 STM32_UART_BAUD={esp32_baud!r}")
+
+    # E2: 接线文档必须已经反映新映射
+    wiring = _read(ROOT / "docs" / "HARDWARE_WIRING.md")
+    _record("E.wiring PB10->ESP32 RX",
+            "PB10 / USART3_TX" in wiring and "D7 / GPIO44 / RX" in wiring,
+            "HARDWARE_WIRING.md 未记录 PB10 对接 ESP32S3 D7/GPIO44")
+    syn_line = [ln for ln in wiring.splitlines()
+                if "RXD" in ln and "|" in ln]
+    _record("E.wiring PB3->SYN6288 RXD",
+            any("PB3" in ln for ln in syn_line),
+            f"SYN6288 RXD 行未指向 PB3: {syn_line}")
+
+    # E3: 旧标识符不得残留在任何非历史归档文件里（按 token 汇总，命中时列出文件）
+    hits: dict[str, list[str]] = {token: [] for token in STALE_TOKENS}
+    for rel, path in _iter_scan_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for token in STALE_TOKENS:
+            if token in text:
+                hits[token].append(rel)
+    for token in STALE_TOKENS:
+        _record(f"E.no_stale {token}", not hits[token],
+                f"串口改造后仍残留于: {', '.join(hits[token])}")
+
+
 def main() -> int:
     ref = _load_reference()
-    check_a_stm32_pins(_read(STM32_CONFIG))
-    check_b_esp32_pins(_read(ESP32_CONFIG))
+    stm32_cfg = _read(STM32_CONFIG)
+    esp32_cfg = _read(ESP32_CONFIG)
+    check_a_stm32_pins(stm32_cfg)
+    check_b_esp32_pins(esp32_cfg)
     check_c_command_coverage(_read(DISPATCHER), ref)
     check_d_event_labels(_read(UI_STATE), ref)
+    check_e_serial_rewire(stm32_cfg, esp32_cfg)
 
     print(f"\nsummary: {_pass_count} PASS, {len(_failures)} FAIL")
     if _failures:

@@ -1,7 +1,7 @@
 // 智能桌面终端 STM32 执行器固件 —— 调度骨架
 //
 // 本文件仅保留全局行缓冲、setup()/loop() 调度，功能已按职责拆分到 src/ 下独立模块
-// （config.h + 20 个模块，含字库迁入 src/ui/fonts/）。模块间依赖方向严格自上而下，
+// （config.h + 21 个模块，含字库迁入 src/ui/fonts/）。模块间依赖方向严格自上而下，
 // 全局量由唯一归属模块以 extern 暴露。纯搬运阶段不改任何协议字符串、引脚号、波特率、
 // 时序常量与初始化/轮询顺序（详见 docs/REBUILD_GUARDRAILS.md）。
 //
@@ -33,6 +33,7 @@
 #include "src/system/i2c_bus.h"
 #include "src/system/ui_demo.h"
 #include "src/system/user_context.h"
+#include "src/system/watchdog.h"
 
 // 行缓冲：由 pollSerial 消费，board 模块 extern 引用。
 String usbLine;
@@ -40,8 +41,8 @@ String espLine;
 
 void setup() {
   usbConsole.begin(115200);
-  espCommandSerial.begin(ESP_IN_BAUD);
-  espAckSerial.begin(ESP_ACK_BAUD);
+  espCommandSerial.begin(ESP_UART_BAUD);
+  syn6288Serial.begin(SYN6288_BAUD);
   delay(20);
   while (espCommandSerial.available()) {
     espCommandSerial.read();
@@ -81,6 +82,8 @@ void setup() {
   initializeOled();
   renderSystemOled();
   writeBack("BT:BOOT:STM32_EXECUTOR");
+  // 看门狗放在最后：外设都初始化完再上狗，避免初始化慢导致的误复位。
+  setupWatchdog();
 }
 
 void loop() {
@@ -98,4 +101,5 @@ void loop() {
     lastTelemetryMs = millis();
     sendTelemetrySnapshot();
   }
+  feedWatchdog();
 }

@@ -29,13 +29,43 @@
 | ESP32S3 Sense | STM32 | 方向 | 作用 |
 | --- | --- | --- | --- |
 | `D5 / GPIO6 / TX` | `PB11 / USART3_RX` | ESP32S3 -> STM32 | 下发 `NET:*` 命令 |
-| `D7 / GPIO44 / RX` | `PB3 / software TX` | STM32 -> ESP32S3 | 返回 `BT:*` ACK/状态 |
+| `D7 / GPIO44 / RX` | `PB10 / USART3_TX` | STM32 -> ESP32S3 | 返回 `BT:*` ACK/遥测/按键 |
 | `GND` | `GND` | 双向 | 共地 |
 
 串口参数：
 
-- ESP32S3 -> STM32：`9600 8N1`。
-- STM32 -> ESP32S3：`9600 8N1`。（2026-09-06 由 `4800` 上调，与下行对称；接收端 ESP32S3 为硬件 UART，STM32 侧为 SoftwareSerial TX，若真机波形不稳可两端回退 4800）
+- 双向均为 `115200 8N1`，共用 USART3，构成全双工链路。
+
+## 2026-09-06 USART3 全双工改造（PB10 与 PB3 对调）
+
+本节记录一次**有意为之**的接线调整，不是"换个引脚试试"（那属于 `docs/REBUILD_GUARDRAILS.md` 第 2 条禁区）。
+
+改造前的分配把 USART3 的硬件 TX（`PB10`）给了 SYN6288，而每 4 秒一次的 600B 级 `BT:*`
+上行却只能走 `PB3` 软件串口。软件串口是逐位 bit-bang，发送 600B 会长时间占用 CPU
+（实测量级约 630 ms），期间 `loop()` 无法推进，直接影响三件靠轮询维持时序的事：
+舵机脉冲（`SERVO_HOLD_MS=800`）、旋律节拍（`MUSIC_NOTE_GAP_MS=35`）、编码器采样。
+
+改动只有两根杜邦线：
+
+| 信号 | 改造前 | 改造后 |
+| --- | --- | --- |
+| STM32 -> ESP32S3 上行 | `PB3`（SoftwareSerial，9600） | **`PB10`（USART3_TX 硬件，115200）** |
+| STM32 -> SYN6288 `RXD` | `PB10`（USART3_TX 硬件） | **`PB3`（SoftwareSerial，9600）** |
+
+这样分的理由：SYN6288 只收不发、每帧 6~206 字节、无需 ACK，软件串口完全够用；
+而 `BT:*` 上行既要发 600B 遥测又要可靠回 ACK，必须用硬件串口。两端（STM32 USART3
+与 ESP32S3 `HardwareSerial`）都是硬件 UART，因此波特率从 9600 提到 115200，
+600B 的线上时间由约 630 ms 降到约 52 ms。
+
+代码侧对应改动：原上行串口对象更名为 `syn6288Serial`（`PB4/PB3`），`writeBack()`
+改走 `espCommandSerial`；原先一进一出两个波特率常量合并为单一的 `ESP_UART_BAUD`，
+并新增 `SYN6288_BAUD`。`tools/verify_firmware_consistency.py` 的 E 段会交叉校验两端波特率是否一致。
+
+已知限制：软件串口发送 SYN6288 帧期间仍会短暂占用 CPU（满帧 206B 约 215 ms，
+实际中文短句约 60~70 ms）。若现场发现播报期间偶发丢命令，把 `NET:TTS*` 的文本截短即可。
+
+回退方式：两端同步把波特率改回 `9600`——STM32 改 `config.h` 的 `ESP_UART_BAUD`，
+ESP32 改 `config.h` 的 `STM32_UART_BAUD`。校验脚本会拦截只改一端的情况。
 
 ## SYN6288 TTS
 
@@ -43,8 +73,8 @@
 | --- | --- |
 | `VCC` | `5V` |
 | `GND` | `GND` |
-| `RXD` | `PB10 / USART3_TX` |
-| `TXD` | 暂不接 |
+| `RXD` | `PB3 / software TX`（2026-09-06 由 `PB10 / USART3_TX` 迁来，见上文改造说明） |
+| `TXD` | 暂不接（`BUSY` 同样未接，播报结束仍靠 `UI_SPEAK_HOLD_MS` 估算） |
 | `SPK+ / SPK-` | 喇叭 |
 
 约束：

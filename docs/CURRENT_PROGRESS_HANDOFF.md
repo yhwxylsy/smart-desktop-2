@@ -25,17 +25,25 @@
 
 ## 当前硬件接线
 
-详见 `docs/HARDWARE_WIRING.md`。本轮没有改线，也决定暂时跳过“换其他串口”方案。
+详见 `docs/HARDWARE_WIRING.md`。
 
-| 链路 | 接线 | 参数/用途 |
+> **2026-09-06 更新：本节接线已变更。** 下方表格中“改造前”一列仅作历史留档，
+> 当前实际接线以“改造后”为准，权威描述见 `docs/HARDWARE_WIRING.md` 的
+> “2026-09-06 USART3 全双工改造”一节。
+
+| 链路 | 改造前 | 改造后（当前） |
 | --- | --- | --- |
-| ESP32S3 -> STM32 | ESP32S3 `D5/GPIO6/TX` -> STM32 `PB11/USART3_RX` | `9600 8N1`，下发 `NET:*` |
-| STM32 -> ESP32S3 | STM32 `PB3/software TX` -> ESP32S3 `D7/GPIO44/RX` | `4800 8N1`，返回 `BT:*` |
-| STM32 -> SYN6288 | STM32 `PB10/USART3_TX` -> SYN6288 `RXD` | SYN6288 文本播报 |
-| STM32 USB 调试 | STM32 `PA2/PA3 USART2` -> COM7 | 调试日志和直连命令 |
-| ESP32S3 USB 调试 | ESP32S3 USB -> COM8 | 配置、烧录、日志 |
+| ESP32S3 -> STM32 | `D5/GPIO6/TX` -> `PB11/USART3_RX`，`9600 8N1` | 接线不变，仅波特率统一为 `115200 8N1` |
+| STM32 -> ESP32S3 | `PB3/software TX` -> `D7/GPIO44/RX`，`4800 8N1` | **`PB10/USART3_TX` -> `D7/GPIO44/RX`，`115200 8N1`** |
+| STM32 -> SYN6288 | `PB10/USART3_TX` -> `RXD` | **`PB3/software TX` -> `RXD`，`9600 8N1`** |
+| STM32 USB 调试 | `PA2/PA3 USART2` -> COM7，调试日志和直连命令 | 不变 |
+| ESP32S3 USB 调试 | ESP32S3 USB -> COM8，配置、烧录、日志 | 不变 |
 
-额外串口结论：STM32F103 上理论还有 `USART1 PA9/PA10`，但 `PA9` 当前被旋转编码器占用；`USART1` remap 到 `PB6/PB7` 又会冲突 I2C OLED/AHT20。因此目前不换硬件串口，优先保留现接线。
+改造动机：原先把硬件 TX 给了最闲的 SYN6288，却让 600B 量级的 `BT:*` 上行走软件串口，
+每 4 秒约 630 ms 的 bit-bang 会停住 `loop()`，拖累舵机脉冲、旋律节拍与编码器采样。
+改造后两端均为硬件 UART，600B 线上时间降到约 52 ms。
+
+额外串口结论（仍然成立）：STM32F103 上理论还有 `USART1 PA9/PA10`，但 `PA9` 当前被旋转编码器占用；`USART1` remap 到 `PB6/PB7` 又会冲突 I2C OLED/AHT20。因此本次改造不新开串口，只把 USART3 原本就存在的 TX/RX 重新分配给更合适的对端。
 
 ## 本轮已完成
 
@@ -71,17 +79,22 @@ CFG:TTS:打开风扇
 
 同一文件中已避免依赖 BluePill variant 是否提供 `Serial3`：
 
+> **2026-09-06 更新：** 原上行串口对象已更名为 `syn6288Serial`，职责随接线改造对调。
+> 当前定义（`src/core/board.cpp`）：
+
 ```cpp
 HardwareSerial usbConsole(PA3, PA2);
 HardwareSerial espCommandSerial(PB11, PB10);
-SoftwareSerial espAckSerial(PB4, PB3);
+SoftwareSerial syn6288Serial(PB4, PB3);
 ```
 
-用途：
+用途（当前）：
 
 - `usbConsole`：COM7 调试和直连输入。
-- `espCommandSerial`：STM32 USART3，接收 ESP32S3 命令，同时 PB10 发 SYN6288。
-- `espAckSerial`：STM32 PB3 软件串口，向 ESP32S3 返回 `BT:*`。
+- `espCommandSerial`：STM32 USART3 **全双工**对接 ESP32S3——`PB11` 收 `NET:*`，`PB10` 发 `BT:*`（ACK/遥测/按键）。
+- `syn6288Serial`：STM32 `PB3` 软件串口，单向驱动 SYN6288 `RXD`（改造前由它承担 ESP32S3 上行）。
+
+改造前（历史留档）：`espCommandSerial` 的 `PB10` 用于发 SYN6288，另一个 `PB3` 软件串口对象（已随改造更名）负责向 ESP32S3 返回 `BT:*`。
 
 ### 3. ESP32S3 已移除 TTS 临时替代逻辑
 
@@ -127,6 +140,7 @@ RAW b'[STM32 RX] \xfeBT:PONG:211954\r\n'
 - 更像是 STM32 -> ESP32S3 的 PB3 软件串口返回链路，首个 `BT:PONG` 偶发带 `0xFE` 脏前缀。
 - ESP32S3 侧前缀清洗和周期性 `NET:UART?` 已能把这个问题变成无害噪声。
 - 不建议现在为此改线，除非后续又出现 action ACK 丢失。
+- **2026-09-06 后续：** 该链路已随 USART3 全双工改造迁到 `PB10` 硬件 TX（`docs/HARDWARE_WIRING.md`）。软件串口 bit-bang 期间占用 CPU 这一根因已消除，脏前缀现象预期随之消失；ESP32S3 侧的前缀清洗与保活保留为兜底，不再需要为它单独改线。
 
 ### 5. 编译和烧录已完成
 
@@ -657,7 +671,8 @@ latest last_ack action=act_0a8a1229b13c OK
 
 ## 当前可接受风险
 
-- PB3 软件串口返回链路仍可能偶发首字节脏前缀，但现在 ESP32S3 会清洗，keepalive 也会持续刷新 UART 状态。
+- 上行链路已于 2026-09-06 迁到 `PB10` 硬件 TX，原“PB3 软件串口偶发首字节脏前缀”风险已消除；ESP32S3 侧清洗与 keepalive 保留为兜底。
+- 残余风险：SYN6288 播报时 `PB3` 软件串口仍会短暂占用 CPU（满帧约 215 ms），期间 ESP32S3 下发的命令可能被延迟处理，但不会丢字节协议帧（见 `docs/HARDWARE_WIRING.md` 已知限制）。
 - SYN6288 协议 ACK 和人工听测均已成功；后续只需在展示前确认音量和清晰度。
 - RFID 的后端模拟闭环和 RC522 真实卡闭环均已成功；当前默认会把已注册 UID 持久化到 `backend/data/rfid_users.json`，如手动删除该文件才需要重新注册 UID `436A4B07`。
 - 当前已实机看到 `pot_raw`、`temperature_c`、`humidity_pct` 进入后端；`distance_ok=false` 说明超声波仍需补查，但不影响 AHT20 与电位器作为答辩时可展示的实时传感数据。
@@ -724,7 +739,7 @@ Invoke-RestMethod http://127.0.0.1:8083/api/chat -Method Post -ContentType 'appl
 
 1. 继续做小程序闭环：先在开发者工具模拟器完成“保存 -> 立即刷新 -> 打开风扇 -> RFID 注册/模拟刷卡”，再转真机预览，把后端地址切到 `http://192.168.0.39:8083`。
 2. 演示前如果重启过后端，优先先检查 `backend/data/rfid_users.json` 仍在，再刷真实卡 UID `436A4B07` 验证 `last_rfid_authorized=true`；只有手动删掉持久化文件后才需要重新注册。
-3. 如果后续又出现 ACK 丢失，再考虑逻辑分析仪抓 PB3/PB11，或者重新评估牺牲 `PA9` 使用 `USART1 PA9/PA10`。
+3. 如果后续又出现 ACK 丢失，用逻辑分析仪抓 `PB10`（STM32 TX）/ `PB11`（STM32 RX）；`PB3` 现在只驱动 SYN6288，不再是上行链路。若确认是 USART3 本身不够用，再重新评估牺牲 `PA9` 启用 `USART1 PA9/PA10`。
 4. 演示前准备一个固定脚本：启动后端、打开 COM8 monitor、开发者工具或手机小程序输入“打开风扇”、刷 RFID 卡、观察 OLED/FAN/TTS/RGB/ACK。
 
 ## 2026-06-11 20:35 云端真实对话验收补充

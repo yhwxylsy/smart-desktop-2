@@ -1,6 +1,9 @@
 // 智能桌面终端 STM32 执行器固件 —— 配置常量（纯搬运自原 sketch L8-43、L45-82、L120-130）
 //
-// 行为保持硬约束：引脚号、波特率、所有时序默认值一律为原值，不得修改。
+// 行为保持硬约束：协议字符串、所有时序默认值一律为原值，不得修改。
+// 例外（2026-09-06 已评审通过的 USART3 全双工改造）：串口引脚分配与两端波特率
+//   见下方"串口链路波特率"一节，回退方式也写在那里。
+//   除此之外所有 PIN_* 引脚号仍是原值，不得修改。
 // STM32duino 运行时（PBx 引脚宏、Stream、SoftwareSerial、Wire 等）由本文件优先包含。
 //
 // 编译：arduino-cli compile -b STMicroelectronics:stm32:GenF1:pnum=BLUEPILL_F103C8
@@ -8,12 +11,20 @@
 #pragma once
 #include <Arduino.h>
 
-// ---- 双串口链路：ESP 命令(9600) 与 ESP ACK(9600) 对称约定 ----
-// 2026-09-06: ACK 上行由 4800 上调为 9600，与下行一致（ESP32S3 收端为硬件 UART，
-// 4800 并非接收端限制；9600 下 600B 遥测发送阻塞由 ~1.25s 降至 ~0.63s）。
-// 若真机发现 SoftwareSerial TX 波形抖动，回退为 4800 即可（两端同步回退）。
-static const uint32_t ESP_IN_BAUD = 9600;    // ESP32S3 TX -> STM32 PB11 / Serial3 RX
-static const uint32_t ESP_ACK_BAUD = 9600;   // STM32 PB3 software TX -> ESP32S3 RX
+// ---- 串口链路波特率 ----
+// 2026-09-06 接线调整（详见 docs/HARDWARE_WIRING.md）：
+//   USART3（PB11 RX / PB10 TX）与 ESP32S3 组成全双工链路，两端都是硬件 UART，因此上到 115200；
+//   SYN6288 改由 PB3 软件串口驱动，保持 9600（SYN6288 出厂默认，且 bit-bang 在低速下更稳）。
+// 背景：此前 PB10 硬件 TX 给了 SYN6288，而 600B 量级的 BT:* 上行却走了 PB3 软件串口，
+//   每 4 秒约 630 ms 的 bit-bang 会长时间占用 CPU，拖累舵机脉冲、旋律节拍与编码器采样。
+// 回退方式：若真机出现乱码或首字节脏前缀，两端同步把波特率改回 9600
+//   （STM32 改本常量；ESP32 改 edge/esp32s3/main/config.h 的 STM32_UART_BAUD）。
+//   只改一端会被 tools/verify_firmware_consistency.py 的 E 段判为不一致。
+static const uint32_t ESP_UART_BAUD = 115200;  // USART3 全双工 <-> ESP32S3
+static const uint32_t SYN6288_BAUD = 9600;     // PB3 software TX -> SYN6288 RXD
+// 600B 遥测在 115200 下线上时间约 52 ms（改造前 9600 软件串口约 630 ms），已无需特殊处理。
+// 若仍想让写入完全不占 loop()，用 -DSERIAL_TX_BUFFER_SIZE=1024 增大硬件串口 TX 缓冲
+// （STM32duino core 默认 64 字节；当前 core 版本的 HardwareSerial 没有 setTxBufferSize()）。
 
 // ---- 板级引脚（PIN_* 原样搬运）----
 static const int PIN_BUZZER = PB9;
@@ -103,3 +114,13 @@ static const uint8_t VOLUME_MAX_PERCENT = 100;
 static const uint8_t VOLUME_STEP_PERCENT = 10;
 static const int8_t ENCODER_STEPS_PER_DETENT = 4;
 static const uint32_t VOLUME_ANNOUNCE_DELAY_MS = 450;
+
+// ---- 独立看门狗（IWDG，LSI 时钟，与 CPU 主时钟无关）----
+// 目的：现场长时间通电时，若 I2C 总线挂死或 loop() 卡在某处，设备能自行复位而不是永久僵住。
+// 注意：IWDG 一旦启动无法用软件关停，只能靠复位清除。
+// 现场应急：用 -DWATCHDOG_ENABLED_BY_DEFAULT=0 重新编译即可整体停用。
+#ifndef WATCHDOG_ENABLED_BY_DEFAULT
+#define WATCHDOG_ENABLED_BY_DEFAULT 1
+#endif
+// 取值需大于单次 loop() 最坏耗时（遥测 + OLED + TTS 帧），同时小于用户能容忍的卡死时长。
+static const uint32_t WATCHDOG_TIMEOUT_MS = 5000;

@@ -115,8 +115,8 @@ bool sendSyn6288Frame(const uint8_t *textBytes, size_t textLen, uint8_t textType
   }
   frame[frameLen - 1] = checksum;
 
-  espCommandSerial.write(frame, frameLen);
-  espCommandSerial.flush();
+  syn6288Serial.write(frame, frameLen);
+  syn6288Serial.flush();
   delay(10);
   return true;
 }
@@ -128,8 +128,8 @@ bool sendSyn6288Command(uint8_t command) {
   frame[2] = 0x01;
   frame[3] = command;
   frame[4] = frame[0] ^ frame[1] ^ frame[2] ^ frame[3];
-  espCommandSerial.write(frame, sizeof(frame));
-  espCommandSerial.flush();
+  syn6288Serial.write(frame, sizeof(frame));
+  syn6288Serial.flush();
   delay(6);
   return true;
 }

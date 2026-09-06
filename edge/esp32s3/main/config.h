@@ -46,8 +46,12 @@
 static const char *DEVICE_ID = "desktop-agent-001";
 static const char *EDGE_ID = "esp32s3-sense-001";
 
-static const int STM32_TX_PIN = 6;   // XIAO D5 -> STM32 PB11, 9600 baud
-static const int STM32_RX_PIN = 44;  // XIAO D7 <- STM32 PB3, 9600 baud
+// 2026-09-06 接线调整：STM32 侧把 USART3(PB11/PB10) 让给 ESP32S3 做全双工，
+// 两端都是硬件 UART，因此统一提到 115200；SYN6288 改走 STM32 PB3 软件串口。
+// 回退时两端必须同步改回 9600（STM32 侧是 config.h 的 ESP_UART_BAUD）。
+static const int STM32_UART_BAUD = 115200;
+static const int STM32_TX_PIN = 6;   // XIAO D5 -> STM32 PB11 / USART3_RX
+static const int STM32_RX_PIN = 44;  // XIAO D7 <- STM32 PB10 / USART3_TX
 
 static const int RFID_RST_PIN = 3;   // XIAO D2
 static const int RFID_SS_PIN = 4;    // XIAO D3

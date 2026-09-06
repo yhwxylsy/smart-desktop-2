@@ -1,5 +1,10 @@
 # Remaining Sensor Connection Handoff - 2026-06-13
 
+> **历史留档（2026-09-06 追加）：** 本文记录的是 2026-06-13 当时的接线与分工，原文不再修改。
+> 此后 STM32 上行链路已从 `PB3` 软件串口迁到 `PB10 / USART3_TX`（两端 115200），
+> `PB3` 改为驱动 SYN6288。本文下方“STM32 -> ESP32S3 ACK/telemetry ... `4800 8N1`”等
+> 描述**已不代表当前状态**，当前权威接线见 `docs/HARDWARE_WIRING.md`。
+
 ## First Instruction To Paste
 
 ```text
