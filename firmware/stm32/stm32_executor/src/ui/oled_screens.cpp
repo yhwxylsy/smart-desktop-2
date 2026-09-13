@@ -126,6 +126,8 @@ void renderStatusScreen(uint32_t now) {
   }
 }
 
+// 整帧重绘：清显存 -> 统计 FPS -> 画当前屏 -> 标记脏，等待 flushOledPage 分页刷出。
+// FPS 是"每 1 秒统计一次重绘次数"，用于链路副屏展示刷新率（侧面反映 loop() 是否被阻塞）。
 void renderSystemOled() {
   if (!oledAvailable) {
     return;
@@ -159,6 +161,9 @@ void showOledText(const String &text) {
   oledRenderPending = true;
 }
 
+// 每帧 UI 总入口（loop() 里调用）。顺序：状态机超时回退 -> 灯效动画 -> 按帧率重绘 -> 分页刷屏。
+// 面试可讲：整条链路没有一处 delay，全靠"millis() 时间戳 + 帧间隔节流"做非阻塞调度，
+// 这样 OLED 刷新和舵机脉冲、旋律、按键轮询才能共存而不互相拖累。
 void updateSystemUi() {
   uint32_t now = millis();
   updateUiMachineState(now);

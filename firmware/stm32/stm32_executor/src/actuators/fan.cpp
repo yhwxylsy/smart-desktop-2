@@ -4,6 +4,9 @@
 uint8_t currentFanLevel = 0;
 bool drv8833Connected = DRV8833_CONNECTED_BY_DEFAULT != 0;
 
+// 停转：两个输入都拉到 0，让 H 桥两侧同时截止，电机彻底断电。
+// 面试可讲：这里同时做 analogWrite(0) + digitalWrite(LOW) 是为了
+// 既清掉 PWM 占空比，又确保引脚电平被硬拉到低，避免 PWM 停止后残留高电平。
 void stopDrv8833() {
   currentFanLevel = 0;
   if (!drv8833Connected) {
@@ -40,6 +43,8 @@ uint8_t fanLevelFromCommand(const String &command) {
   return (uint8_t)level;
 }
 
+// 开风扇：IN1 拉低、IN2 打 PWM（当前接线这个方向才是正转）。
+// 档位 1~3 对应 217/235/255 占空比——最低档也设 ~85%，因为占空比太低小风扇起不来。
 bool driveFanOn(uint8_t level) {
   if (!drv8833Connected) {
     return false;

@@ -27,6 +27,8 @@ void setRgb(bool red, bool green, bool blue) {
   }
 }
 
+// 把 UI 状态机映射成"基础 RGB 颜色"：蓝=启动、青=聆听、黄=处理/播报/执行、
+// 绿=就绪、红=锁定/错误。这是静态映射，动画闪烁由 updateRgbAnimation 在基础色上叠加。
 RgbState uiMachineBaseRgb() {
   switch (uiMachineState) {
     case UI_STATE_BOOT:
@@ -46,6 +48,9 @@ RgbState uiMachineBaseRgb() {
   return rgbState(true, false, false);
 }
 
+// 灯效动画：每 RGB_FRAME_INTERVAL_MS(80ms) 推一帧，按状态机做呼吸/闪烁/双闪。
+// 面试可讲：全程非阻塞——用 `(now - started) % 1000` 取相位做脉宽调制，不依赖 delay。
+// 优先级：ACK 闪烁(ackFlashUntilMs) > 状态呼吸/闪烁。
 void updateRgbAnimation() {
   uint32_t now = millis();
   if (now - lastRgbFrameMs < RGB_FRAME_INTERVAL_MS) {

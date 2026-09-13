@@ -4,6 +4,16 @@
 #include "../protocol/protocol.h"
 
 // UI 状态服务（原 sketch L138-218、L386-436、L824-941、L1092-1132 原样搬运）。
+//
+// 职责：整个设备的"会话状态机"核心。三个层次：
+//   1. UiEventType   ：事件类型——外界（串口命令/按键/RFID）触发的输入；
+//   2. UiMachineState：设备状态——S0 BOOT ~ S7 ERROR 共 8 态，决定 OLED/RGB 显示什么；
+//   3. UiEventState  ：单条事件的过程记录——把 parse/action/light/ack 各环节耗时存下来，
+//                      用于 USB 日志和 OLED 的"链路诊断副屏"。
+//
+// 面试可讲：这是典型的事件驱动状态机。核心函数 transitionUiMachineForEvent(type)
+// 完成"事件 -> 状态迁移"，且有一个"锁定态守卫"——LOCKED 状态只认 LOCK_OFF/ERROR/AI_OFF，
+// 其它事件一律忽略，保证锁屏期间不被普通命令打断。
 enum UiEventType : uint8_t {
   UI_EVENT_BOOT,
   UI_EVENT_DEMO,

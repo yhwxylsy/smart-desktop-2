@@ -51,6 +51,11 @@ void enterUiMachineState(UiMachineState state, uint32_t startedMs) {
   oledRenderPending = true;
 }
 
+// 事件 -> 状态迁移。面试可讲两点：
+//   1. 守卫条件：LOCKED 态只放行 LOCK_OFF/ERROR/AI_OFF，其它事件被吞掉——
+//      这保证了"锁屏"语义，RFID 未授权时即使有心跳/遥测也不会误解锁或改状态。
+//   2. 多个事件归并到同一目标态（如 ACK/LOCK_OFF/AI_IDLE 都回 READY），
+//      让"回到就绪"只写一次，避免状态爆炸。
 void transitionUiMachineForEvent(UiEventType type, uint32_t startedMs) {
   if (uiMachineState == UI_STATE_LOCKED &&
       type != UI_EVENT_LOCK_OFF && type != UI_EVENT_ERROR && type != UI_EVENT_AI_OFF) {
@@ -97,6 +102,9 @@ void transitionUiMachineForEvent(UiEventType type, uint32_t startedMs) {
   }
 }
 
+// 时间驱动的"自动回退"：某些状态是瞬态，待够时间就回到 READY。
+// 例如 BOOT 显示 1.8s、EXECUTING 显示 2.2s、SPEAKING 显示 7s（因为 SYN6288 的
+// BUSY 引脚没接，播报结束只能靠固定时长估算）。这是"没有硬件反馈时用时间兜底"的典型做法。
 void updateUiMachineState(uint32_t now) {
   uint32_t age = now - uiMachineStateStartedMs;
   if ((uiMachineState == UI_STATE_BOOT && age >= UI_BOOT_HOLD_MS) ||

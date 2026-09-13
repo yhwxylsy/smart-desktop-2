@@ -14,6 +14,9 @@ uint32_t lastVolumeChangeMs = 0;
 uint32_t volumeOverlayUntilMs = 0;
 bool ttsInterrupted = false;
 
+// 把一个 Unicode 码点按 UTF-16BE（大端）追加到输出缓冲。
+// BMP 字符直接写 2 字节；补充平面（>0xFFFF）用代理对写成 4 字节。
+// 0xD800~0xDFFF 是代理区，单独出现即非法，直接拒绝。
 bool appendCodePointAsUtf16Be(uint32_t codePoint, uint8_t *out, size_t capacity, size_t &outLen) {
   if (codePoint <= 0xFFFF) {
     if (codePoint >= 0xD800 && codePoint <= 0xDFFF) {
@@ -41,6 +44,9 @@ bool appendCodePointAsUtf16Be(uint32_t codePoint, uint8_t *out, size_t capacity,
   return true;
 }
 
+// 从 UTF-8 字节流解码出下一个码点（1~4 字节变长）。面试可讲 UTF-8 编码规则：
+// 首字节高位 0 -> ASCII；110xxxxx -> 2 字节；1110xxxx -> 3 字节；11110xxx -> 4 字节；
+// 后续字节固定 10xxxxxx。这里还做了"最短编码/超范围/代理区"的合法性校验，防止坏输入。
 bool decodeNextUtf8CodePoint(const uint8_t *bytes, size_t length, size_t &index, uint32_t &codePoint) {
   if (index >= length) {
     return false;
@@ -94,6 +100,10 @@ bool decodeNextUtf8CodePoint(const uint8_t *bytes, size_t length, size_t &index,
   return true;
 }
 
+// 拼装并发送一条 SYN6288 合成帧。
+// 帧结构：FD | 长度高字节 | 长度低字节 | 0x01 | 文本类型 | 文本数据 | XOR校验。
+// 长度字段 = 文本字节数 + 3（命令 1 + 类型 1 + 校验 1 之外的数据长度约定）。
+// 校验 = 从帧头到校验位之前所有字节的异或。
 bool sendSyn6288Frame(const uint8_t *textBytes, size_t textLen, uint8_t textType) {
   if (textLen == 0 || textLen > SYN6288_MAX_TEXT_BYTES) {
     return false;
@@ -134,6 +144,9 @@ bool sendSyn6288Command(uint8_t command) {
   return true;
 }
 
+// 播报 UTF-8 文本：先拼一段 SYN6288 音量控制指令 `[vN]`（N=0~16），
+// 再把 UTF-8 逐码点转成 UTF-16BE，最后发 Unicode 合成帧。
+// 面试可讲：音量不是单独一条指令，而是内嵌在播报文本里的控制标记，这是 SYN6288 的协议特点。
 bool speakUtf8Bytes(const uint8_t *bytes, size_t length) {
   uint8_t unicodeBytes[SYN6288_MAX_TEXT_BYTES];
   size_t unicodeLen = 0;

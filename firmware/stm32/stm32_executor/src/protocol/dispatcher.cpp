@@ -255,6 +255,12 @@ static const NetCommandDef NET_COMMANDS[] = {
     {"NET:SERVO:", false, onServo},
 };
 
+// 命令执行入口：表驱动分发。遍历 NET_COMMANDS[]，按"精确匹配 or 前缀匹配"找到
+// 对应 handler 并调用。找不到则返回 false（上层会回 BT:ERR）。
+// 面试可讲：用"命令表 + 函数指针"替代一长串 if-else，好处是——
+//   1. 新增命令只需加一行表项，不用动分发逻辑；
+//   2. 表可以被测试脚本静态解析（verify_firmware_consistency.py 会检查
+//      每条命令都能被前缀扫描识别、不存在"隐形命令"）。
 bool executeNetCommand(const String &command) {
   for (const NetCommandDef &entry : NET_COMMANDS) {
     bool matched = entry.exact ? (command == entry.prefix) : command.startsWith(entry.prefix);

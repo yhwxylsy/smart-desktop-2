@@ -3,6 +3,16 @@
 #include "../../config.h"
 
 // SYN6288 语音合成（原 sketch L120-136、L1459-1696 原样搬运）。
+//
+// 职责：把中文文本转成 SYN6288 的语音合成帧，从软件串口（PB3）发出去；并管理音量。
+// 面试可讲三个核心：
+//   1. SYN6288 帧格式：`0xFD + 数据长度(2B) + 命令(0x01合成/0x02停止) + 文本类型(0x03=Unicode)
+//      + 文本数据 + XOR校验`，长度/校验都是协议规定，必须逐字节拼对。
+//   2. 为什么做 UTF-8 -> UTF-16BE：后端下发的文本是 UTF-8，但 SYN6288 的 Unicode 模式
+//      要的是 UTF-16 大端序。所以本地实现了一套 UTF-8 解码 + UTF-16BE 编码，避免在
+//      STM32 上放 GBK 字表。
+//   3. 音量：SYN6288 用文本内嵌的 `[vN]`（N=0~16）控制，代码把用户 0%~100% 音量
+//      映射到 0~16 级，每档 10%。
 // speechVolumePercent / volumeOverlayUntilMs 供屏幕层读取，以 extern 暴露。
 extern uint8_t speechVolumePercent;
 extern uint32_t volumeOverlayUntilMs;

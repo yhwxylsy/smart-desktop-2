@@ -1,6 +1,8 @@
 #include "text_util.h"
 #include "../../config.h"
 
+// 返回大写副本。containsUpperToken 用它实现"忽略大小写匹配"，
+// 代价是每次构造一个临时 String——命令量小，可接受。
 String upperCopy(const String &text) {
   String result = text;
   result.toUpperCase();
@@ -11,6 +13,8 @@ bool containsUpperToken(const String &text, const char *token) {
   return upperCopy(text).indexOf(token) >= 0;
 }
 
+// 生成"适合上屏"的短文本：截断到 maxLen，并把不可打印/非 ASCII 字节折叠成单个 '?'。
+// lastReplacement 保证连续垃圾字节只显示一个 '?'，避免满屏问号。
 String compactForDisplay(const String &text, uint8_t maxLen) {
   String out;
   bool lastReplacement = false;

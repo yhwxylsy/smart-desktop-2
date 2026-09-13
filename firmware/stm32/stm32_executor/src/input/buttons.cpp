@@ -61,8 +61,12 @@ void handleKey2Released(uint32_t now) {
   }
 }
 
+// KEY2 按键状态机（短按=终止播报，长按=PTT 录音）。三阶段：
+//   1) 消抖：电平变化后 35ms 内不采信，过滤机械抖动；
+//   2) 稳定态：若按下且按住超过 KEY2_HOLD_START_MS(600ms) 且还没发过 HOLD，判定长按；
+//   3) 边沿：从"稳定态"真正翻转时才触发按下/释放动作，避免重复触发。
 void updateKey2Button() {
-  bool pressed = digitalRead(PIN_DEMO_BUTTON) == LOW;
+  bool pressed = digitalRead(PIN_DEMO_BUTTON) == LOW;  // 低电平=按下（上拉输入）
   uint32_t now = millis();
 
   if (pressed != key2LastReading) {
@@ -70,11 +74,13 @@ void updateKey2Button() {
     key2LastChangeMs = now;
   }
 
+  // 消抖窗口内直接返回，不处理。
   if (now - key2LastChangeMs < BUTTON_DEBOUNCE_MS) {
     return;
   }
 
   if (pressed == key2StablePressed) {
+    // 按住状态：检测是否达到长按阈值（只触发一次）。
     if (key2StablePressed && !key2HoldStartSent && now - key2PressedMs >= KEY2_HOLD_START_MS) {
       key2HoldStartSent = true;
       handleKey2HoldStart(now);
@@ -82,6 +88,7 @@ void updateKey2Button() {
     return;
   }
 
+  // 稳定态翻转：真正的按下/释放边沿。
   key2StablePressed = pressed;
   if (key2StablePressed) {
     key2PressedMs = now;

@@ -37,6 +37,12 @@ void setServoAngle(uint8_t angle) {
   digitalWrite(PIN_SERVO, LOW);
 }
 
+// 软件 PWM 状态机（loop() 每轮调用）。逻辑：
+//   高电平阶段：持续 servoPulseWidthUs 后拉低；
+//   低电平阶段：等到下一个 20ms 周期起点再拉高。
+// 全程用 micros() 计算，非阻塞；hold 超时后自动停止并释放舵机。
+// 面试可讲：这就是"不占硬件定时器、用时间戳做 PWM"的做法，缺点是精度受 loop() 其它耗时影响——
+// 这正是上一轮把串口改成硬件 UART、避免 bit-bang 长时间阻塞的动机之一。
 void updateServoPulse() {
   if (!servoActive) {
     return;

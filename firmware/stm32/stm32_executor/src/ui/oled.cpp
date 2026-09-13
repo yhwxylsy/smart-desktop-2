@@ -22,6 +22,8 @@ void clearOledBuffer() {
   memset(oledBuffer, 0, sizeof(oledBuffer));
 }
 
+// 写一个像素。SSD1306 是"页寻址"：纵向 8 行为一页，字节的每一位对应同列的一行。
+// 所以内存索引 = x + (y/8)*128，位 = 1<<(y%8)。
 void oledSetPixel(uint8_t x, uint8_t y, bool on) {
   if (x >= OLED_WIDTH || y >= OLED_HEIGHT) {
     return;
@@ -141,6 +143,8 @@ void oledDrawCjkTextCentered(const char *text, uint8_t y) {
   }
 }
 
+// 画线：Bresenham 直线算法（面试高频算法题）。只用整数加减，不用浮点/乘法，
+// 非常适合没有 FPU 的 MCU。err 是误差累积项，e2 决定先走 x 还是 y。
 void oledDrawLine(int x0, int y0, int x1, int y1, bool on) {
   int dx = abs(x1 - x0);
   int sx = x0 < x1 ? 1 : -1;
@@ -188,6 +192,9 @@ bool oledWriteDataChunk(uint16_t offset, uint8_t length) {
   return Wire.endTransmission() == 0;
 }
 
+// 初始化 SSD1306：先探测两个常见地址 0x3D/0x3C（不同批次模块地址可能不同），
+// 再按数据手册发一串初始化命令（0xAE 关显示、0xAF 开显示、0x81 对比度、0x8D 电荷泵等）。
+// 面试可讲：这块芯片必须"命令序列"初始化，命令字节前要带一个 0x00 控制字节。
 bool initializeOled() {
   usbConsole.println("[OLED] probe 0x3D then 0x3C");
   if (oledProbe(OLED_ADDR_PRIMARY)) {
@@ -220,6 +227,10 @@ bool initializeOled() {
   return true;
 }
 
+// 分页非阻塞刷新：每次调用只刷一页（128 字节），8 页轮流刷完一轮。
+// 用 OLED_FLUSH_INTERVAL_MS=4ms 节流，避免一次性写 1KB I2C 数据阻塞 loop()——
+// 这正是配合"软件串口/舵机脉冲"等时序敏感任务的非阻塞设计。
+// 命令：0xB0|page 设页地址，0x00/0x10 设列地址低/高位。
 void flushOledPage() {
   if (!oledAvailable || !oledDirty) {
     return;

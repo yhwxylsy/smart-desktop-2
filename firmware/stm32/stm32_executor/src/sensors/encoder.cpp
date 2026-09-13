@@ -23,6 +23,9 @@ void initEncoder() {
   encoderLastState = readEncoderState();
 }
 
+// 轮询一次编码器。核心是 TRANSITIONS 状态转移表：
+//   上一状态(2bit)<<2 | 当前状态(2bit) = 4bit 索引，查表得方向（+1/-1/0）。
+// 只认"合法的单步格雷码跳变"，非法跳变（如同时跳两相）返回 0，天然消抖。
 void updateEncoder() {
   static const int8_t TRANSITIONS[16] = {
     0, -1, 1, 0,
