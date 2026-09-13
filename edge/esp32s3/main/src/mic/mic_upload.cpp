@@ -3,6 +3,9 @@
 #include "../../config.h"
 #include "../config/config_store.h"
 
+// 把整段数据完整写入 TCP 连接。面试可讲：TCP 的 write() 不一定一次写完（发送缓冲可能满），
+// 所以要循环写直到写完；每写成功一点就刷新超时（deadline），配合 availableForWrite()
+// 做背压，避免 ESP32 内存小、一次塞太多导致失败。
 bool writeAllToClient(
     WiFiClient &client,
     const uint8_t *data,
@@ -59,6 +62,9 @@ String formatWriteFailure(const char *part, size_t written, size_t expected) {
   return error;
 }
 
+// 手写解析 HTTP 响应：先读状态行拿状态码，再按 Content-Length 精确读 body。
+// 面试可讲：这里没有用 HTTPClient 库，是因为要走 multipart 自定义上传，直接用
+// 底层 WiFiClient 自己拼 HTTP/1.1 报文、自己解析响应，控制粒度更细。
 int readHttpResponse(WiFiClient &client, String &response) {
   String statusLine = client.readStringUntil('\n');
   int code = 0;
@@ -418,6 +424,8 @@ AsrUploadResult uploadMicWav(const uint8_t *wavBuffer, size_t wavSize, const Str
     return result;
   }
 
+  // 整包直传（带 3 次重试）失败后，降级为"分块上传"兜底：
+  // 大 WAV 一次发完容易因内存/网络失败，切成小块逐块 POST 更稳，每块还有独立重试。
   Serial.printf("[MIC] direct upload failed, trying chunked fallback: %s\n", result.error.c_str());
   AsrUploadResult chunked = uploadMicWavChunked(wavBuffer, wavSize, source, inject);
   if (chunked.error.isEmpty() && !chunked.requestOk) {

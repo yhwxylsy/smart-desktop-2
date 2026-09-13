@@ -50,6 +50,8 @@ void generateWavHeader(uint8_t *wavHeader, uint32_t wavSize, uint32_t sampleRate
   memcpy(wavHeader, templateHeader, sizeof(templateHeader));
 }
 
+// PCM 预处理：先算直流偏置（整段均值），再减去偏置并乘数字增益，最后限幅到 int16 范围。
+// 面试可讲：麦克风常有直流偏置，去直流能提升 ASR 识别率；用 int64 累加避免大样本数溢出。
 void conditionPcm16(uint8_t *pcmBuffer, size_t pcmSize) {
   int16_t *samples = (int16_t *)pcmBuffer;
   size_t sampleCount = pcmSize / sizeof(int16_t);

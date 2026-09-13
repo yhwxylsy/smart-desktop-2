@@ -48,6 +48,12 @@ bool scanTargetWifi(int32_t *channelOut, uint8_t bssidOut[6], int32_t *rssiOut, 
   return found && bestIndex >= 0;
 }
 
+// 连接 WiFi。要点：
+//   1. 未配置 SSID 时不动作，只限流打印提示（5s 一次），避免刷屏；
+//   2. 已连接直接返回（幂等，loop() 里反复调用安全）；
+//   3. 关 persistent/关 sleep/开 autoReconnect，保证实时链路不掉；
+//   4. 先定向扫描拿 BSSID+信道，再定向连接，跳过全信道扫描加速；
+//   5. 带超时（WIFI_CONNECT_TIMEOUT_MS）的轮询等待，不会永久卡死。
 void connectWifi() {
   if (configStore::wifiSsid().isEmpty()) {
     if (millis() - lastWifiMissingLogMs > 5000) {

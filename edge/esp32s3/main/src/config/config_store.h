@@ -5,6 +5,10 @@
 // 去耦合：收归 configStore 命名空间访问器。NVS handle 与内存态全部私有化，
 // 外部仅能经下列访问接口读写，禁止直接引用内部全局量。
 // 原 CFG:RESET 语义（清 NVS + 复位内存态、不触碰 serverPort）由 reset() 完整保留。
+//
+// 面试可讲：WiFi 密码/服务器地址/设备 token 这些配置用 ESP32 的 Preferences（即 NVS
+// 非易失性闪存）持久化，掉电不丢；SSID 等敏感项只在本地闪存，不上报、不进 Git。
+// 所有状态通过访问器暴露（getter/setter），隐藏了"NVS handle 何时打开/关闭"的实现细节。
 namespace configStore {
 
 // 生命周期
